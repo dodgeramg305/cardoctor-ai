@@ -72,4 +72,31 @@ if uploaded_file is not None:
     image_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
     if image_bgr is None:
-        st.er
+        st.error("Error reading image. Please try another file.")
+    else:
+        st.subheader("Original Image")
+        st.image(bgr_to_rgb(image_bgr), use_container_width=True)
+
+        if st.button("Analyze Image"):
+            processed_bgr, edges, score, regions = process_image(image_bgr)
+
+            st.subheader("Detected Damage (Highlighted)")
+            st.image(bgr_to_rgb(processed_bgr), use_container_width=True)
+
+            st.subheader("Edge Map")
+            st.image(edges, use_container_width=True, clamp=True)
+
+            st.markdown(f"### **Damage Score:** `{score}` / 10")
+            st.markdown(f"### **Regions Detected:** `{regions}`")
+
+            # Prepare image for download
+            ok, buffer = cv2.imencode(".png", processed_bgr)
+            if ok:
+                st.download_button(
+                    label="Download Processed Image",
+                    data=BytesIO(buffer),
+                    file_name="cardoctor_ai_processed.png",
+                    mime="image/png",
+                )
+else:
+    st.info("Please upload an image to start.")
