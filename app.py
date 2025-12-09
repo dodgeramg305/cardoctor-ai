@@ -65,7 +65,6 @@ st.markdown('<div class="subtitle">Upload a car image to detect scratches, dents
 def bgr_to_rgb(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-
 def get_severity_class(score: int):
     if score <= 3:
         return "score-green", "Minor Damage"
@@ -79,11 +78,7 @@ def get_severity_class(score: int):
 # COST ESTIMATOR
 # =========================
 def estimate_repair_cost(score, regions, ratio):
-    """
-    Estimate repair cost using severity score, region count, and damaged area ratio.
-    """
-
-    # Base ranges depending on severity
+    """Estimate repair cost using severity score, region count, and damaged area ratio."""
     if score <= 3:
         base_min, base_max = 100, 350
     elif score <= 6:
@@ -91,11 +86,8 @@ def estimate_repair_cost(score, regions, ratio):
     else:
         base_min, base_max = 1200, 3000
 
-    # Each detected region adds cost
     region_factor = 1 + (regions * 0.10)
-
-    # Damaged area ratio also increases cost
-    area_factor = 1 + min(ratio * 8, 1.5)  # cap multiplier at 1.5
+    area_factor = 1 + min(ratio * 8, 1.5)
 
     est_min = int(base_min * region_factor * area_factor)
     est_max = int(base_max * region_factor * area_factor)
@@ -104,14 +96,13 @@ def estimate_repair_cost(score, regions, ratio):
 
 
 # =========================
-# CORE DAMAGE DETECTION
+# DAMAGE DETECTION
 # =========================
 def process_image(image_bgr):
     output = image_bgr.copy()
 
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-
     edges = cv2.Canny(blur, 80, 200)
 
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -136,8 +127,8 @@ def process_image(image_bgr):
             region_sizes.append(area)
 
     damage_ratio = total_damage_area / image_area if image_area > 0 else 0
-    avg_region_size = (total_damage_area / detected_regions) if detected_regions > 0 else 0
 
+    avg_region_size = (total_damage_area / detected_regions) if detected_regions > 0 else 0
     region_size_score = np.clip(avg_region_size / (0.02 * image_area), 0, 1)
     area_component = np.clip(damage_ratio / 0.04, 0, 1)
     region_component = np.clip(detected_regions / 20, 0, 1)
@@ -155,108 +146,31 @@ def process_image(image_bgr):
 
 
 # =========================
-# PDF REPORT GENERATOR
+# PDF REPORT
 # =========================
 def generate_pdf_report(original_rgb, processed_rgb, score, severity_label, regions, ratio, cost_min, cost_max):
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
-    width, height = letter
 
     c.setFont("Helvetica-Bold", 20)
-    c.drawString(72, height - 72, "CarDoctor-AI Damage Report")
+    c.drawString(72, 750, "CarDoctor-AI Damage Report")
 
     c.setFont("Helvetica", 11)
-    c.drawString(72, height - 95, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(72, 730, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(72, height - 140, "Summary")
+    c.drawString(72, 700, "Summary")
 
     c.setFont("Helvetica", 11)
-    c.drawString(90, height - 160, f"Damage Score: {score} / 10")
-    c.drawString(90, height - 175, f"Severity Level: {severity_label}")
-    c.drawString(90, height - 190, f"Detected Regions: {regions}")
-    c.drawString(90, height - 205, f"Approx. Damage Area: {ratio * 100:.2f}%")
-    c.drawString(90, height - 220, f"Estimated Repair Cost: ${cost_min:,} - ${cost_max:,}")
+    c.drawString(90, 680, f"Damage Score: {score} / 10")
+    c.drawString(90, 665, f"Severity Level: {severity_label}")
+    c.drawString(90, 650, f"Detected Regions: {regions}")
+    c.drawString(90, 635, f"Damage Area: {ratio * 100:.2f}%")
+    c.drawString(90, 620, f"Estimated Cost: $ {cost_min:,} – $ {cost_max:,}")
 
     try:
         orig = ImageReader(Image.fromarray(original_rgb))
         proc = ImageReader(Image.fromarray(processed_rgb))
 
-        c.drawString(72, height - 250, "Original Image:")
-        c.drawImage(orig, 72, 350, width=220, height=150)
-
-        c.drawString(320, height - 250, "Detected Damage:")
-        c.drawImage(proc, 320, 350, width=220, height=150)
-    except:
-        pass
-
-    c.showPage()
-    c.save()
-    buf.seek(0)
-    return buf
-
-
-# =========================
-# MAIN UI
-# =========================
-uploaded_file = st.file_uploader("Upload a car image", type=["jpg", "jpeg", "png"])
-
-if uploaded_file:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    image_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
-    if image_bgr is None:
-        st.error("Could not process image.")
-    else:
-        original_rgb = bgr_to_rgb(image_bgr)
-
-        st.subheader("1. Uploaded Image")
-        st.image(original_rgb, use_container_width=True)
-
-        if st.button("Analyze Damage"):
-            processed_bgr, score, regions, ratio = process_image(image_bgr)
-            processed_rgb = bgr_to_rgb(processed_bgr)
-
-            severity_class, severity_label = get_severity_class(score)
-
-            st.subheader("2. Detection Results")
-
-            col1, col2 = st.columns([2, 1])
-
-            with col1:
-                alpha = st.slider("Before / After Blend", 0.0, 1.0, 1.0, 0.05)
-                blended = cv2.addWeighted(original_rgb, 1 - alpha, processed_rgb, alpha, 0)
-                st.image(blended, use_container_width=True)
-                st.image(processed_rgb, caption="Detected Damage Regions", use_container_width=True)
-
-            with col2:
-                st.markdown(
-                    f"<span class='score-badge {severity_class}'>Damage Score: {score}/10</span>",
-                    unsafe_allow_html=True
-                )
-                st.write(f"**Severity:** {severity_label}")
-                st.write(f"**Regions Detected:** {regions}")
-                st.write(f"**Damage Area:** {ratio * 100:.2f}%")
-
-                # COST ESTIMATION
-                cost_min, cost_max = estimate_repair_cost(score, regions, ratio)
-                st.markdown("### 💵 Estimated Repair Cost")
-                st.write(f"**Range:** ${cost_min:,} – ${cost_max:,}")
-                st.write("*Estimate depends on severity, region count, and surface area.*")
-
-                # PDF DOWNLOAD (updated to include cost estimate)
-                pdf = generate_pdf_report(
-                    original_rgb, processed_rgb, score, severity_label, regions, ratio,
-                    cost_min, cost_max
-                )
-                st.download_button(
-                    "Download PDF Damage Report",
-                    data=pdf,
-                    file_name="CarDoctorAI_Damage_Report.pdf",
-                    mime="application/pdf",
-                )
-
-        st.markdown('<div class="footer">© 2025 CarDoctor-AI • Visual Damage Pre-Check</div>', unsafe_allow_html=True)
-
-else:
-    st.info("Upload a clear photo of the vehicle to begin.")
+        c.drawString(72, 580, "Original Image:")
+        c.drawImage(orig,
