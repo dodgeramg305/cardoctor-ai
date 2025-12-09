@@ -45,9 +45,9 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**How it works**")
     st.write(
-        "1. Upload a vehicle photo.\n"
-        "2. CarDoctor-AI analyzes edges and contours.\n"
-        "3. It highlights potential damage and estimates severity + repair cost."
+        "1. Enter vehicle details.\n"
+        "2. Upload a vehicle photo.\n"
+        "3. CarDoctor-AI highlights possible damage and estimates repair cost."
     )
     st.markdown("---")
     st.write("v1.0 • © 2025 CarDoctor-AI")
@@ -58,6 +58,24 @@ with st.sidebar:
 st.markdown('<div class="title">CarDoctor-AI — Vehicle Damage Detection</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Upload a car image to detect scratches, dents, and smashed areas</div>', unsafe_allow_html=True)
 
+# =========================
+# VEHICLE INFO INPUTS
+# =========================
+st.subheader("Vehicle Information")
+
+colA, colB, colC = st.columns([1, 1, 1])
+
+with colA:
+    year = st.text_input("Year", placeholder="e.g., 2018")
+
+with colB:
+    make = st.text_input("Make", placeholder="e.g., Honda")
+
+with colC:
+    model = st.text_input("Model", placeholder="e.g., Accord")
+
+if year == "" or make == "" or model == "":
+    st.warning("Enter Year, Make, and Model for a complete damage report.")
 
 # =========================
 # HELPERS
@@ -73,12 +91,10 @@ def get_severity_class(score: int):
     else:
         return "score-red", "Severe Damage"
 
-
 # =========================
 # COST ESTIMATOR
 # =========================
 def estimate_repair_cost(score, regions, ratio):
-    """Estimate repair cost using severity score, region count, and damaged area ratio."""
     if score <= 3:
         base_min, base_max = 100, 350
     elif score <= 6:
@@ -93,7 +109,6 @@ def estimate_repair_cost(score, regions, ratio):
     est_max = int(base_max * region_factor * area_factor)
 
     return est_min, est_max
-
 
 # =========================
 # DAMAGE DETECTION
@@ -115,7 +130,6 @@ def process_image(image_bgr):
 
     total_damage_area = 0.0
     detected_regions = 0
-    region_sizes = []
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -124,31 +138,21 @@ def process_image(image_bgr):
             cv2.rectangle(output, (x, y), (x + cw, y + ch), (255, 0, 0), 2)
             total_damage_area += area
             detected_regions += 1
-            region_sizes.append(area)
 
     damage_ratio = total_damage_area / image_area if image_area > 0 else 0
 
-    avg_region_size = (total_damage_area / detected_regions) if detected_regions > 0 else 0
-    region_size_score = np.clip(avg_region_size / (0.02 * image_area), 0, 1)
     area_component = np.clip(damage_ratio / 0.04, 0, 1)
     region_component = np.clip(detected_regions / 20, 0, 1)
-    size_component = np.clip(region_size_score, 0, 1)
 
-    combined_score = (
-        0.60 * area_component +
-        0.25 * region_component +
-        0.15 * size_component
-    )
-
+    combined_score = (0.70 * area_component) + (0.30 * region_component)
     damage_score = int(np.clip(round(combined_score * 9) + 1, 1, 10))
 
     return output, damage_score, detected_regions, damage_ratio
 
-
 # =========================
 # PDF REPORT
 # =========================
-def generate_pdf_report(original_rgb, processed_rgb, score, severity_label, regions, ratio, cost_min, cost_max):
+def generate_pdf_report(original_rgb, processed_rgb, score, severity_label, regions, ratio, cost_min, cost_max, year, make, model):
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
 
@@ -157,16 +161,17 @@ def generate_pdf_report(original_rgb, processed_rgb, score, severity_label, regi
 
     c.setFont("Helvetica", 11)
     c.drawString(72, 730, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(72, 715, f"Vehicle: {year} {make} {model}")
 
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(72, 700, "Summary")
+    c.drawString(72, 690, "Summary")
 
     c.setFont("Helvetica", 11)
-    c.drawString(90, 680, f"Damage Score: {score} / 10")
-    c.drawString(90, 665, f"Severity Level: {severity_label}")
-    c.drawString(90, 650, f"Detected Regions: {regions}")
-    c.drawString(90, 635, f"Damage Area: {ratio * 100:.2f}%")
-    c.drawString(90, 620, f"Estimated Cost: $ {cost_min:,} – $ {cost_max:,}")
+    c.drawString(90, 670, f"Damage Score: {score} / 10")
+    c.drawString(90, 655, f"Severity Level: {severity_label}")
+    c.drawString(90, 640, f"Detected Regions: {regions}")
+    c.drawString(90, 625, f"Damage Area: {ratio * 100:.2f}%")
+    c.drawString(90, 610, f"Estimated Cost: $ {cost_min:,} – $ {cost_max:,}")
 
     try:
         orig = ImageReader(Image.fromarray(original_rgb))
@@ -184,7 +189,6 @@ def generate_pdf_report(original_rgb, processed_rgb, score, severity_label, regi
     c.save()
     buf.seek(0)
     return buf
-
 
 # =========================
 # MAIN UI
@@ -220,6 +224,8 @@ if uploaded_file:
                 st.image(processed_rgb, caption="Detected Damage Regions", use_container_width=True)
 
             with col2:
+                st.write(f"**Vehicle:** {year} {make} {model}")
+
                 st.markdown(
                     f"<span class='score-badge {severity_class}'>Damage Score: {score}/10</span>",
                     unsafe_allow_html=True
@@ -230,21 +236,20 @@ if uploaded_file:
 
                 # COST ESTIMATION
                 cost_min, cost_max = estimate_repair_cost(score, regions, ratio)
-                
-                st.markdown("### 💵 Estimated Repair Cost")                
+
+                st.markdown("### 💵 Estimated Repair Cost")
                 st.markdown(
                     f"<h3 style='margin-top:-10px; font-weight:700;'>"
                     f"$ {cost_min:,} – $ {cost_max:,}"
                     f"</h3>",
                     unsafe_allow_html=True
                 )
-
                 st.write("*Estimate varies by shop pricing and labor costs.*")
 
-                # PDF DOWNLOAD
+                # PDF DOWNLOAD (updated)
                 pdf = generate_pdf_report(
                     original_rgb, processed_rgb, score, severity_label, regions, ratio,
-                    cost_min, cost_max
+                    cost_min, cost_max, year, make, model
                 )
                 st.download_button(
                     "Download PDF Damage Report",
