@@ -6,10 +6,33 @@ from io import BytesIO
 st.set_page_config(page_title="CarDoctor-AI", layout="wide")
 
 # ---------------------------
-# Header Styling
+# CSS STYLING (with !important so Streamlit doesn't override it)
 # ---------------------------
 st.markdown("""
 <style>
+
+.score-badge {
+    display: inline-block;
+    padding: 12px 26px;
+    border-radius: 10px;
+    font-size: 22px;
+    font-weight: 700;
+    color: white !important;
+}
+
+.score-green {
+    background-color: #28A745 !important;  /* GREEN */
+}
+
+.score-yellow {
+    background-color: #FFC107 !important;  /* YELLOW */
+    color: black !important;
+}
+
+.score-red {
+    background-color: #DC3545 !important;  /* RED */
+}
+
 .title {
     font-size: 38px;
     font-weight: 700;
@@ -22,40 +45,24 @@ st.markdown("""
     color: #666;
     margin-bottom: 25px;
 }
-.score-badge {
-    display: inline-block;
-    padding: 10px 24px;
-    border-radius: 12px;
-    font-size: 22px;
-    font-weight: 600;
-    color: white;
-}
-.score-green {
-    background-color: #28A745;
-}
-.score-yellow {
-    background-color: #FFC107;
-    color: #000;
-}
-.score-red {
-    background-color: #DC3545;
-}
+
 </style>
 """, unsafe_allow_html=True)
 
+# Header
 st.markdown('<div class="title">CarDoctor-AI — Vehicle Damage Detection</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Upload a car image to detect scratched, dented, or smashed areas</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Upload a car image to detect scratches, dents, and smashed areas</div>', unsafe_allow_html=True)
 
 
 # ---------------------------
-# Helper: Convert BGR → RGB
+# CONVERT BGR → RGB
 # ---------------------------
 def bgr_to_rgb(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
 # ---------------------------
-# MAIN DAMAGE DETECTION LOGIC
+# DAMAGE DETECTION FUNCTION
 # ---------------------------
 def process_image(image_bgr):
     output = image_bgr.copy()
@@ -66,14 +73,14 @@ def process_image(image_bgr):
     # Canny edges
     edges = cv2.Canny(blur, 80, 200)
 
-    # Get raw contours (no merging, you want small boxes)
+    # No merging; you want small boxes
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     h, w = gray.shape
     image_area = float(h * w)
 
-    min_area = image_area * 0.0005   # keep small contours
-    max_area = image_area * 0.20     # avoid giant false boxes
+    min_area = image_area * 0.0005   # keep small boxes
+    max_area = image_area * 0.20     # ignore giant areas
 
     total_damage_area = 0.0
     detected_regions = 0
@@ -83,17 +90,17 @@ def process_image(image_bgr):
         area = cv2.contourArea(cnt)
         if min_area <= area <= max_area:
             x, y, cw, ch = cv2.boundingRect(cnt)
-            cv2.rectangle(output, (x, y), (x + cw, y + ch), (255, 0, 0), 2)
+            cv2.rectangle(output, (x, y), (x + cw, y + ch), (0, 0, 255), 2)
             total_damage_area += area
             detected_regions += 1
             region_sizes.append(area)
 
     # ---------------------------
-    # IMPROVED DAMAGE SCORING
+    # UPDATED DAMAGE RATING SYSTEM
     # ---------------------------
     damage_ratio = total_damage_area / image_area if image_area > 0 else 0
-
     avg_region_size = (total_damage_area / detected_regions) if detected_regions > 0 else 0
+
     region_size_score = np.clip(avg_region_size / (0.02 * image_area), 0, 1)
 
     area_component = np.clip(damage_ratio / 0.04, 0, 1)
@@ -112,7 +119,7 @@ def process_image(image_bgr):
 
 
 # ---------------------------
-# UI + SEVERITY COLORS
+# GET SEVERITY COLOR CLASS
 # ---------------------------
 def get_severity_class(score):
     if score <= 3:
@@ -123,7 +130,10 @@ def get_severity_class(score):
         return "score-red", "Severe Damage"
 
 
-uploaded_file = st.file_uploader("Upload a car image (JPG/PNG)", type=["jpg", "jpeg", "png"])
+# ---------------------------
+# STREAMLIT UI
+# ---------------------------
+uploaded_file = st.file_uploader("Upload a car image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
     st.divider()
@@ -142,10 +152,10 @@ if uploaded_file:
         st.divider()
         st.subheader("2. Damage Detection Results")
 
-        # Severity style + label
         severity_class, severity_label = get_severity_class(score)
 
         col1, col2 = st.columns([2, 1])
+        
         with col1:
             st.image(bgr_to_rgb(processed), caption="Detected Damage Regions", use_container_width=True)
 
@@ -156,9 +166,8 @@ if uploaded_file:
             )
             st.write(f"**Severity:** {severity_label}")
             st.write(f"**Damage Regions Detected:** {regions}")
-            st.write(f"**Approx. Damaged Area:** {ratio * 100:.2f}% of image")
+            st.write(f"**Approx. Damaged Area:** {ratio * 100:.2f}%")
 
-        # Download
         ok, buffer = cv2.imencode(".png", processed)
         if ok:
             st.download_button(
@@ -169,4 +178,4 @@ if uploaded_file:
             )
 
 else:
-    st.info("Upload an image to get started.")
+    st.info("Upload an image to begin.")
