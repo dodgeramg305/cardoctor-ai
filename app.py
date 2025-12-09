@@ -6,7 +6,7 @@ from io import BytesIO
 st.set_page_config(page_title="CarDoctor-AI", layout="wide")
 
 # ---------------------------
-# Custom Page Header
+# Custom Page Header Styling
 # ---------------------------
 st.markdown("""
 <style>
@@ -47,33 +47,58 @@ def bgr_to_rgb(img):
 # Image Processing Function
 # ----------------------------------------
 def process_image(image_bgr):
+    """
+    Returns:
+      processed_bgr  - image with damage boxes drawn
+      damage_score   - 1–10 score based on area + regions
+      damage_regions - number of detected regions
+      damage_ratio   - fraction of image area covered by damage (0–1)
+    """
     output = image_bgr.copy()
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blur, 100, 200)
+
+    # Edges (internal, not displayed)
+    edges = cv2.Canny(blur, 80, 180)
 
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     h, w = gray.shape
-    image_area = h * w
-    min_area = image_area * 0.005   # requires larger contour (reduces box clutter)
+    image_area = float(h * w)
 
-    total_damage_area = 0
+    # Require a contour to be at least 0.25% of image area (filters tiny noise)
+    min_area = image_area * 0.0025
+
+    total_damage_area = 0.0
     damage_regions = 0
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if area >= min_area:
             x, y, cw, ch = cv2.boundingRect(cnt)
-            cv2.rectangle(output, (x, y), (x+cw, y+ch), (255, 0, 0), 3)
+            # Thicker red box for clarity
+            cv2.rectangle(output, (x, y), (x + cw, y + ch), (255, 0, 0), 3)
             total_damage_area += area
             damage_regions += 1
 
-    damage_ratio = total_damage_area / image_area
-    raw_score = damage_ratio * 25  
-    damage_score = int(np.clip(np.round(raw_score), 1, 10)) if damage_regions > 0 else 1
+    # Fraction of the image covered by detected damage
+    damage_ratio = total_damage_area / image_area if image_area > 0 else 0.0
 
-    return output, edges, damage_score, damage_regions
+    # --------- Damage Score Logic (more realistic) ---------
+    # Score based on coverage: 
+    # ~2% area -> low score, ~20%+ area -> near max
+    area_component = np.clip(damage_ratio / 0.02, 0, 1)  # 0 to 1
+
+    # Score based on count of regions (up to 10 regions)
+    region_component = np.clip(damage_regions / 8.0, 0, 1)  # 0 to 1
+
+    # Combine them: area is more important than count
+    combined = 0.7 * area_component + 0.3 * region_component
+
+    # Map 0–1 combined to 1–10, clamp
+    damage_score = int(np.clip(np.round(combined * 9) + 1, 1, 10)) if total_damage_area > 0 else 1
+
+    return output, damage_score, damage_regions, damage_ratio
 
 
 uploaded_file = st.file_uploader("Upload a car image", type=["jpg", "jpeg", "png"])
@@ -90,21 +115,25 @@ if uploaded_file:
         st.image(bgr_to_rgb(image_bgr), caption="Original Image", use_container_width=True)
 
     if st.button("Analyze Image"):
-        processed_bgr, edges, score, regions = process_image(image_bgr)
+        processed_bgr, score, regions, ratio = process_image(image_bgr)
 
         st.divider()
         st.subheader("2. Detection Results")
 
-        col1, col2 = st.columns([1, 1])
+        col1, col2 = st.columns([3, 2])
         with col1:
-            st.image(bgr_to_rgb(processed_bgr), caption="Damage Highlighted", use_container_width=True)
+            st.image(bgr_to_rgb(processed_bgr), caption="Detected Damage (Highlighted)", use_container_width=True)
+
         with col2:
-            st.image(edges, caption="Edge Map", use_container_width=True, clamp=True)
+            st.markdown("<br><span class='score-badge'>Damage Score: "
+                        f"{score} / 10</span>", unsafe_allow_html=True)
+            st.write(f"**Regions Detected:** {regions}")
+            st.write(f"**Approx. Area Affected:** {ratio * 100:.1f}% of image")
 
-        st.markdown(f"<br><span class='score-badge'>Damage Score: {score} / 10</span>", unsafe_allow_html=True)
-
-        st.write(f"**Regions Detected:** {regions}")
-        st.write("Higher damage scores indicate more detected impact areas.")
+            st.markdown(
+                "- Scores closer to **1** indicate minor or limited detected damage.\n"
+                "- Scores closer to **10** indicate larger or multiple impacted areas."
+            )
 
         ok, buffer = cv2.imencode(".png", processed_bgr)
         if ok:
